@@ -50,7 +50,7 @@ param(
     [string]$ComputerCsvPath = "C:\temp\Computers.csv",
     [string]$SubnetsCsvPath  = "C:\temp\AD_Subnets.csv",
     [string]$OutputCsvPath   = "C:\temp\FinalResults.csv",
-    [string]$GCServer        = "GC01.domain.local:3268",  # Adjust to your environment
+    [string]$GCServer        = "<YOUR GC SERVER>:3268",  # Adjust to your environment
     [int]$ThrottleLimit      = 10
 )
 
@@ -93,22 +93,40 @@ function ConvertCidrToRange {
         [string]$Cidr
     )
 
-    $parts  = $Cidr.Split('/')
-    $netIp  = $parts[0]
-    $prefix = [int]$parts[1]
+    try {
+        # Split the CIDR into the IP address and prefix
+        $parts  = $Cidr.Split('/')
+        $netIp  = $parts[0]
+        $prefix = [int]$parts[1]
 
-    $netNum = ConvertTo-UInt32Ip -IpAddress $netIp
-    $mask   = [uint32](0xFFFFFFFF -shl (32 - $prefix))
+        # Convert the network IP to a uint32
+        $netNum = ConvertTo-UInt32Ip -IpAddress $netIp
 
-    $network   = $netNum -band $mask
-    $broadcast = $network -bor ([uint32]~$mask)
+        # Generate the subnet mask based on the prefix
+        $mask   = [uint32](0xFFFFFFFF -shl (32 - $prefix))
 
-    return @{
-        Network   = $network
-        Broadcast = $broadcast
-        Prefix    = $prefix
+        # Apply the bitwise NOT operation (Preserved from original version)
+        $maskInt = [int32]$mask
+        $maskNot = [uint32]([math]::Pow(2, 32) - 1 - $maskInt)
+
+        # Calculate the network and broadcast addresses
+        $network   = $netNum -band $mask
+        $broadcast = $network -bor $maskNot
+
+        # Return the result as a hashtable
+        return @{
+            Network   = $network
+            Broadcast = $broadcast
+            Prefix    = $prefix
+        }
+    }
+    catch {
+        # Handle any errors and provide a meaningful message
+        Write-Error "Failed to convert CIDR '$Cidr': $($_.Exception.Message)"
+        return $null
     }
 }
+
 
 function Test-IpInRange {
     <#
@@ -263,7 +281,7 @@ $results = $computers | ForEach-Object -Parallel {
             }
         }
         catch {
-            Write-Warning "[Parallel] Error querying GC for $computerFQDN: $($_.Exception.Message)"
+            Write-Warning "[Parallel] Error querying GC for ${computerFQDN}: $($_.Exception.Message)"
         }
     }
 
@@ -295,7 +313,7 @@ $results = $computers | ForEach-Object -Parallel {
                 -ErrorAction SilentlyContinue
         }
         catch {
-            Write-Warning "[Parallel] Error searching for user $lastLoggedInUser: $($_.Exception.Message)"
+            Write-Warning "[Parallel] Error searching for user ${lastLoggedInUser}: $($_.Exception.Message)"
         }
     }
 
